@@ -1,89 +1,80 @@
 import cv2
-import face_recognition
-import pandas as pd
-from datetime import datetime
+import numpy as np
+import tokenizers
+import face_recognition_models
 
-#cmnt
+face = cv2.data.haarcascades+"haarcascade_frontalface_default.xml"
 
-# Create a list to store student names and IDs
-student_names = []
-student_ids = []
+face_cascade = cv2.CascadeClassifier(face)
 
-# Load images of known faces and encode them
-known_face_encodings = []
-known_face_names = []
+# Training data
+faces = np.array([
+    cv2.imread('kev.jpg', 0),
+    cv2.imread('kk.jpg', 0)
+])
 
-# Load data from Excel file (if exists)
-try:
-    attendance_data = pd.read_excel("attendance.xlsx")
-    student_names = attendance_data["Name"].tolist()
-    student_ids = attendance_data["ID"].tolist()
-except:
-    attendance_data = pd.DataFrame(columns=["Time", "Name", "ID"])
+stream = tokenizers.open('kev.jpg')  # @UndefinedVariable
+contents = stream.read()
+stream.close()
 
-# Initialize the webcam
-video_capture = cv2.VideoCapture(0)
+
+
+labels = np.array([0, 1])
+
+# Create the recognizer and train it on the training data
+recognizer = cv2.face.LBPHFaceRecognizer_create()
+recognizer.train(faces, labels)
+
+# Initialize the video capture device
+cap = cv2.VideoCapture(0)
 
 while True:
-    # Capture a frame from the webcam
-    ret, frame = video_capture.read()
+    # Capture frame-by-frame
+    ret, frame = cap.read()
 
-    # Convert the image from BGR color (which OpenCV uses) to RGB color (which face_recognition uses)
-    rgb_frame = frame[:, :, ::-1]
+    # Convert the frame to grayscale
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-    # Find all the faces and their encodings in the current frame
-    face_locations = face_recognition.face_locations(rgb_frame)
-    face_encodings = face_recognition.face_encodings(rgb_frame, face_locations)
+    # Detect faces in the grayscale frame
+    faces = face_cascade.detectMultiScale(gray, 1.3, 5)
 
-    # Loop through each face in the current frame
-    for (top, right, bottom, left), face_encoding in zip(face_locations, face_encodings):
-        # Compare the current face encoding with the known face encodings
-        matches = face_recognition.compare_faces(known_face_encodings, face_encoding)
+    # Loop through each detected face
+    for (x, y, w, h) in faces:
+        # Extract the face from the frame
+        face = gray[y:y+h, x:x+w]
 
-        # Find the best match index
-        match_index = None
-        if True in matches:
-            match_index = matches.index(True)
+        # Resize the face to a standard size
+        face_resized = cv2.resize(face, (100, 100))
 
-        # If a match was found, get the name and ID of the student
-        if match_index is not None:
-            name = known_face_names[match_index]
-            id = student_ids[student_names.index(name)]
+        # Predict the label for the face
+        label, confidence = recognizer.predict(face_resized)
 
-            # Check if the student has already been marked as present
-            if id not in attendance_data["ID"].tolist():
-                # Add the attendance record to the Excel file
-                time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                attendance_data = attendance_data.append({"Time": time, "Name": name, "ID": id}, ignore_index=True)
-                attendance_data.to_excel("attendance.xlsx", index=False)
+        # Draw a rectangle around the detected face
+        cv2.rectangle(frame, (x, y), (x+w, y+h), (0, 255, 0), 2)
 
-        # If no match was found, ask the user if they want to register a new face
-        else:
-            cv2.imshow('Video', frame)
-            key = cv2.waitKey(1)
+        # Display the predicted label and confidence level
+        cv2.putText(frame, f"Label: {label} Confidence: {confidence}", (x, y-10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
 
-            if key == ord('r'):
-                # Ask the user to input the name and ID of the new student
-                name = input("Enter student name: ")
-                id = input("Enter student ID: ")
-
-                # Add the new student to the list of known faces
-                known_face_encodings.append(face_encoding)
-                known_face_names.append(name)
-                student_names.append(name)
-                student_ids.append(id)
-
-                # Save the new face encoding to the image file
-                cv2.imwrite("known_faces/{}.jpg".format(name), frame)
-
-                # Add the attendance record to the Excel file
-                time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                attendance_data = attendance_data.append({"Time": time, "Name": name, "ID": id}, ignore_index=True)
-                attendance_data.to_excel("attendance.xlsx", index=False)
-
-                print("New student registered:", name)
-
-    # Display the video capture with the detected faces
+        # Display the resulting frame
     cv2.imshow('Video', frame)
 
-    # Exit the program when the user presses
+
+    def execfile(cap, globals=None, locals=None):
+        if globals is None:
+            import sys
+            globals = sys._getframe(1).f_globals
+        if locals is None:
+            locals = sys._getframe(1).f_locals
+        with open(cap, "r") as execfile:
+            exec(compile(contents + "\n", cap, 'exec'), globals, locals)
+
+
+    # Exit loop if 'q' is pressed
+    if cv2.waitKey(1) & 0xFF == ord('q'):
+        break
+
+
+
+# Release the capture and close all windows
+cap.release()
+cv2.destroyAllWindows()
